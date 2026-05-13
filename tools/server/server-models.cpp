@@ -749,56 +749,59 @@ int server_models::can_fit(const buft_memory_map & bmm_req) const {
     return res;
 }
 
-void server_models::unload_lru(const buft_memory_map & bmm_req) {
+bool server_models::limits_exceeded(const buft_memory_map & bmm_req) const {
     const bool check_active = base_params.models_max > 0;
     const bool check_memory = base_params.models_memory_margin > 0;
 
     if (!check_active && !check_memory) {
-        return; // no limit
+        return false;
     }
 
-    if (check_memory) {
+    int count_active = 0;
+    for (const auto & m : mapping) {
+        if (m.second.meta.is_running()) {
+            count_active++;
+        }
+    }
+
+    const bool active_exceeded = check_active && count_active >= base_params.models_max;
+    const bool memory_exceeded = check_memory && can_fit(bmm_req) > 0;
+
+    return active_exceeded || memory_exceeded;
+}
+
+void server_models::unload_lru(const buft_memory_map & bmm_req) {
+    if (base_params.models_memory_margin > 0) {
         GGML_ASSERT(!bmm_available.empty());
     }
 
     while (true) {
         std::string lru_model_name;
-        int64_t lru_last_used = ggml_time_ms();
-
-        int count_active = 0;
-        int count_exceed = 0;
         {
             std::unique_lock<std::mutex> lk(mutex);
-            for (const auto & m : mapping) {
-                if (m.second.meta.is_running()) {
-                    count_active++;
-                    if (m.second.meta.last_used < lru_last_used) {
-                        lru_model_name = m.first;
-                        lru_last_used = m.second.meta.last_used;
-                    }
-                }
+            if (!limits_exceeded(bmm_req)) {
+                break;
             }
-            if (check_memory) {
-                count_exceed = can_fit(bmm_req);
+            int64_t lru_last_used = ggml_time_ms();
+            for (const auto & m : mapping) {
+                if (m.second.meta.is_running() && m.second.meta.last_used < lru_last_used) {
+                    lru_model_name = m.first;
+                    lru_last_used  = m.second.meta.last_used;
+                }
             }
         }
 
-        const bool active_exceeded = check_active && count_active >= base_params.models_max;
-        const bool memory_exceeded = check_memory && count_exceed > 0;
-
-        if (!lru_model_name.empty() && (active_exceeded || memory_exceeded)) {
-            SRV_INF("limits reached (count=%d, memory margin exceeded on %d buft(s)), removing LRU name=%s\n",
-                    count_active, count_exceed, lru_model_name.c_str());
-            unload(lru_model_name);
-            // wait for unload to complete
-            {
-                std::unique_lock<std::mutex> lk(mutex);
-                cv.wait(lk, [this, &lru_model_name]() {
-                    return mapping[lru_model_name].meta.status == SERVER_MODEL_STATUS_UNLOADED;
-                });
-            }
-        } else {
+        if (lru_model_name.empty()) {
             break;
+        }
+
+        SRV_INF("limits exceeded, removing LRU name=%s\n", lru_model_name.c_str());
+        unload(lru_model_name);
+        {
+            std::unique_lock<std::mutex> lk(mutex);
+            cv.wait(lk, [this, &lru_model_name]() {
+                return mapping[lru_model_name].meta.status == SERVER_MODEL_STATUS_UNLOADED;
+            });
         }
     }
 }
@@ -1006,25 +1009,8 @@ void server_models::_load(const std::string & name, const buft_memory_map & bmm_
     // exceeding models_max. Without this, the window between unload_lru()
     // releasing its lock and this lock_guard acquiring allows multiple
     // threads to each observe capacity and all proceed to load.
-    {
-        const bool check_active = base_params.models_max > 0;
-        const bool check_memory = base_params.models_memory_margin > 0;
-
-        if (check_active || check_memory) {
-            int count_active = 0;
-            for (const auto & m : mapping) {
-                if (m.second.meta.is_running()) {
-                    count_active++;
-                }
-            }
-
-            const bool active_exceeded = check_active && count_active >= base_params.models_max;
-            const bool memory_exceeded = check_memory && can_fit(bmm_req) > 0;
-
-            if (active_exceeded || memory_exceeded) {
-                throw std::runtime_error("model limit reached, try again later");
-            }
-        }
+    if (limits_exceeded(bmm_req)) {
+        throw std::runtime_error("model limit reached, try again later");
     }
 
     // prepare new instance info
