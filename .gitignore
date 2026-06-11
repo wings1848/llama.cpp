@@ -86,6 +86,7 @@
 /tools/server/*.mjs.hpp
 /tools/server/*.gz.hpp
 !/build_64.sh
+!/build_swlp_cuda.bat
 !/examples/*.bat
 !/examples/*/*.kts
 !/examples/*/*/*.kts
@@ -160,3 +161,19 @@ a.out.*
 
 AGENTS.local.md
 .pi/SYSTEM.md
+
+# SWLP project artifacts
+nul
+plan.md
+/results_comprehensive/
+
+# SWLP working notes (review/report drafts)
+/comprehensive_test_review.md
+/context.md
+/docs_review.md
+/gap_report.md
+/progress.md
+/review-code.md
+/review-docs.md
+/test_review.md
+/test_scripts_review.md

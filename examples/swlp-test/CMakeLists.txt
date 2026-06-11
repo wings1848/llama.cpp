@@ -1,0 +1,11 @@
+set(TARGET llama-swlp-test)
+add_executable(${TARGET} swlp-test.cpp)
+install(TARGETS ${TARGET} RUNTIME)
+target_link_libraries(${TARGET} PRIVATE llama ${CMAKE_THREAD_LIBS_INIT})
+target_compile_features(${TARGET} PRIVATE cxx_std_17)
+
+set(TARGET_BENCH llama-swlp-bench)
+add_executable(${TARGET_BENCH} swlp-bench.cpp)
+install(TARGETS ${TARGET_BENCH} RUNTIME)
+target_link_libraries(${TARGET_BENCH} PRIVATE llama ${CMAKE_THREAD_LIBS_INIT})
+target_compile_features(${TARGET_BENCH} PRIVATE cxx_std_17)
