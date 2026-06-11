@@ -52,7 +52,7 @@
 | R3 | 低 | 根目录文档移至 docs-zh/ | 根目录 | 目录整理 |
 | R4 | 低 | 删除重复构建脚本 build_swlp_cuda.ps1 | 根目录 | 删除 |
 | C10 | 中 | async migration 未自动启用，导致 Gen 性能下降 24% | `src/llama-swlp.cpp` | `set_backends()` 中添加 CUDA 检测自动启用 |
-| T6 | 低 | swlp-bench 缺少 async-migration 参数支持 | `examples/swlp-test/swlp-bench.cpp` | 新增 `--async-migration` CLI 参数 |
+| T6 | 低 | swlp-bench 缺少 async-migration 参数支持 | `examples/swlp-test/swlp-bench.cpp` | 新增 `--swlp-async-migration` CLI 参数 |
 
 ---
 

@@ -225,13 +225,13 @@ class _MonMgr:
 # ---------------------------------------------------------------------------
 
 _SWLP_FLAGS = [  # (cli_flag, param_key, default)
-    ("--ngl", "ngl", 0), ("--window", "window", 0), ("--prefetch", "prefetch", 1),
-    ("--expert-cache", "expert_cache", 0),
+    ("--ngl", "ngl", 0), ("--swlp-window", "window", 0), ("--swlp-prefetch", "prefetch", 1),
+    ("--swlp-expert-cache", "expert_cache", 0),
     ("--ctx", "ctx", 4096), ("--threads", "threads", 4), ("--batch", "batch", 2048),
     ("--warmup", "warmup", 1), ("--iters", "iters", 5),
 ]
-_SWLP_BOOL = [("--expert-prefetch","expert_prefetch"), ("--adaptive","adaptive"),
-              ("--pinned","pinned"), ("--swlp-verbose","swlp_verbose")]
+_SWLP_BOOL = [("--swlp-expert-prefetch","expert_prefetch"), ("--swlp-adaptive","adaptive"),
+              ("--swlp-pinned-copy","pinned"), ("--swlp-verbose","swlp_verbose")]
 
 def _build_cmd(bench, model_path, params, defaults, extra, mode, out):
     cmd = [str(bench), model_path]
@@ -438,6 +438,31 @@ def _find_baseline(gr, ngl, mode):
         return exact[0].get(field, 0)
     return 0
 
+def _calc_vram_savings(all_r):
+    """Calculate VRAM savings for each SWLP config vs its full-GPU baseline.
+    Deduplicates by (model_id, test_id) - VRAM is shared across pp/gen modes."""
+    savings = []
+    seen = set()
+    gpu_bl = {}
+    for r in all_r:
+        if r.get("window")==0 and r.get("ngl",0) > 0 and not r.get("error"):
+            gpu_bl[r["model_id"]] = r.get("gpu_vram_peak_mb", 0) or r.get("vram_mib", 0)
+    for r in all_r:
+        if r.get("window")==0 or r.get("error"): continue
+        mid = r["model_id"]
+        tid = r["test_id"]
+        key = (mid, tid)
+        if key in seen: continue
+        seen.add(key)
+        if mid not in gpu_bl: continue
+        swlp_vram = r.get("gpu_vram_peak_mb", 0) or r.get("vram_mib", 0)
+        base_vram = gpu_bl[mid]
+        if base_vram > 0:
+            pct = 100.0 * (base_vram - swlp_vram) / base_vram
+            savings.append(dict(model_id=mid, test_id=tid, desc=r.get("desc","?"),
+                              swlp_vram=swlp_vram, base_vram=base_vram, saved_pct=f"{pct:.0f}%"))
+    return savings
+
 def _scan_bugs(all_r):
     bugs = []
     for r in all_r:
@@ -498,6 +523,11 @@ def run_analysis(dir):
         print(f"\nBUG REPORT: {len(bugs)} issues\n{'='*55}")
         for b in bugs: print(f"  {b['model_id']} #{b['test_id']} {b['desc']} [{b['mode']}]\n    {b['error_msg'][:120]}")
     else: print("\nNo bugs or anomalies found.")
+    savings = _calc_vram_savings(r)
+    if savings:
+        print(f"\nVRAM SAVINGS (SWLP vs Full GPU)\n{'='*55}")
+        for s in savings:
+            print(f"  {s['model_id']} #{s['test_id']} {s['desc']}: {s['swlp_vram']}MB vs {s['base_vram']}MB = save {s['saved_pct']}")
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -645,6 +675,11 @@ def main():
         with open(out_dir/"bugs.json","w") as f: json.dump(all_bugs, f, indent=2)
         print(f"Saved: {out_dir}/bugs.json")
     else: print("\nNo bugs or anomalies found.")
+    all_savings = _calc_vram_savings(all_r)
+    if all_savings:
+        print(f"\nVRAM SAVINGS (SWLP vs Full GPU)\n{'='*55}")
+        for s in all_savings:
+            print(f"  {s['model_id']} #{s['test_id']} {s['desc']}: {s['swlp_vram']}MB vs {s['base_vram']}MB = save {s['saved_pct']}")
     with open(out_dir/"all_results.json","w") as f: json.dump(all_r, f, indent=2)
     ok = sum(1 for r in all_r if not r.get("error"))
     print(f"Saved: {out_dir}/all_results.json\nSummary: {ok}/{len(all_r)} passed ({len(all_r)-ok} failed)")

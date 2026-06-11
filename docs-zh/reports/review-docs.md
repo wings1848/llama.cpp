@@ -18,20 +18,15 @@
 
 ## 1. 🔴 `build_swlp_cuda.ps1` Does Not Exist
 
-**Evidence**:  
-Only `build_swlp_cuda.bat` exists in the repo root. The `.ps1` is referenced in:
+**📌 RESOLVED (2026-06-11)**
 
-| File | Reference |
-|------|-----------|
-| `docs-zh/llama.cpp-swlp优化.md` §5 | `powershell -File build_swlp_cuda.ps1` (primary recommended command) |
-| `docs-zh/README.md` build table | `build_swlp_cuda.ps1` listed as **recommended** script |
-| `plan.md` Batch C | Proposes modifying `build_swlp_cuda.ps1` lines (file is assumed to exist) |
+`build_swlp_cuda.ps1` has been created with extended functionality:
+- Uses `vswhere` for VS detection (not just hardcoded paths)
+- Supports `-Clean`, `-Target`, `-BuildDir`, `-Config`, `-Jobs` parameters
+- Uses `cmd /c` temp batch chaining to correctly propagate vcvars64.bat environment
+- `build_swlp_cuda.bat` has been removed (replaced by .ps1)
 
-**Impact**:  
-Users following the documentation's primary instruction will get a file-not-found error. The `.bat` file works correctly (it *does* have auto-detect logic — the `.bat` already implements what the plan proposed for the `.ps1`), so only the documentation is wrong. The bat file handles: env var override, 4-edition VS 2022 auto-search, incremental build, and `--clean` flag.
-
-**Fix**:  
-Either create the `.ps1` with the same logic as the `.bat`, or correct all doc references to say `build_swlp_cuda.bat` is the only script available.
+**Current state**: `build_swlp_cuda.ps1` is the only build script in the repo root.
 
 ---
 
@@ -42,16 +37,16 @@ Either create the `.ps1` with the same logic as the `.bat`, or correct all doc r
 But the README example runs it against the bench:
 
 ```
-.\build_cuda_swlp\bin\llama-swlp-bench.exe model.gguf --window 8 --prefetch 2 --swlp-async-migration 1
+.\build_cuda_swlp\bin\llama-swlp-bench.exe model.gguf --swlp-window 8 --swlp-prefetch 2 --swlp-async-migration 1
 ```
 
-This will print "Unknown option: --swlp-async-migration" and exit with code 1.
+> **✅ 已修复 2026-06-12**: bench 工具现在已支持 `--swlp-async-migration` 参数解析。
 
-**Impact**:  
-Users following this example will get an error. The async migration feature is real in the C++ code (CUDA stream migration + events), just not exposed via the bench CLI.
+**Impact (已解决)**:  
+~~Users following this example will get an error.~~ The `--swlp-async-migration` flag was added to the bench (2026-06-12) as part of the SWLP CLI naming unification.
 
-**Fix**:  
-Either add `--swlp-async-migration` parsing to the bench, or correct the README to reference `llama-cli` or remove the bench example for async migration.
+**Fix applied**:  
+Added `--swlp-async-migration` parsing to `examples/swlp-test/swlp-bench.cpp` alongside all other SWLP flag normalization.
 
 ---
 
@@ -191,7 +186,7 @@ Change `is_known_crash` to *not* mark `window == n_layers` as a crash. Instead, 
 
 ## 8. 🟢 Minor: Test Script Passes Unnecessary Flags for Baselines
 
-In `run_one()` the command always includes `--prefetch N` and `--adaptive` / `--pinned` flags even for baseline tests where `window=0` (SWLP disabled). The bench ignores these when window=0, so no functional issue, but it makes the command lines misleading.
+In `run_one()` the command always includes `--swlp-prefetch N` and `--swlp-adaptive` / `--swlp-pinned-copy` flags even for baseline tests where `window=0` (SWLP disabled). The bench ignores these when window=0, so no functional issue, but it makes the command lines misleading.
 
 ---
 

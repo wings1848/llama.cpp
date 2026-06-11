@@ -56,14 +56,14 @@ static void print_usage(const char * prog) {
         "  --ngl N             GPU layers (default: 999 = all)\n"
         "\n"
         "SWLP:\n"
-        "  --window N          Window size (-1=auto, 0=off, default: 0)\n"
+        "  --swlp-window N     Window size (-1=auto, 0=off, default: 0)\n"
         "  --swlp-auto         Auto-select optimal window size\n"
-        "  --prefetch N        Prefetch depth (default: 1)\n"
-        "  --expert-cache N    MoE expert cache size (default: 0)\n"
-        "  --expert-prefetch   Enable MoE expert prefetch\n"
-        "  --adaptive          Enable adaptive window tuning\n"
-        "  --pinned            Enable pinned memory for DMA\n"
-        "  --async-migration   Enable async PCIe pipelining (CUDA streams)\n"
+        "  --swlp-prefetch N   Prefetch depth (default: 1)\n"
+        "  --swlp-expert-cache N  MoE expert cache size (default: 0)\n"
+        "  --swlp-expert-prefetch  Enable MoE expert prefetch\n"
+        "  --swlp-adaptive     Enable adaptive window tuning\n"
+        "  --swlp-pinned-copy  Enable pinned memory for DMA\n"
+        "  --swlp-async-migration  Enable async PCIe pipelining (CUDA streams)\n"
         "  --swlp-alpha F      EWMA smoothing factor (0.1-1.0, default: auto)\n"
         "  --swlp-adapt-interval N  Adaptive adjustment interval in decodes (default: auto)\n"
         "  --swlp-verbose      Enable SWLP migration logging\n"
@@ -235,15 +235,15 @@ int main(int argc, char ** argv) {
 
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0)           { print_usage(argv[0]); return 0; }
-        else if (strcmp(argv[i], "--expert-prefetch") == 0) { cfg.expert_prefetch = true; }
-        else if (strcmp(argv[i], "--adaptive") == 0)       { cfg.adaptive = true; }
-        else if (strcmp(argv[i], "--pinned") == 0)         { cfg.use_pinned_copy = true; }
-        else if (strcmp(argv[i], "--async-migration") == 0) { cfg.async_migration = true; }
+        else if (strcmp(argv[i], "--swlp-expert-prefetch") == 0) { cfg.expert_prefetch = true; }
+        else if (strcmp(argv[i], "--swlp-adaptive") == 0)       { cfg.adaptive = true; }
+        else if (strcmp(argv[i], "--swlp-pinned-copy") == 0)    { cfg.use_pinned_copy = true; }
+        else if (strcmp(argv[i], "--swlp-async-migration") == 0) { cfg.async_migration = true; }
         else if (strcmp(argv[i], "--swlp-verbose") == 0)   { cfg.verbose = true; }
         else if (parse_int_arg(argc, argv, i, "--ngl", cfg.n_gpu_layers)) {}
-        else if (parse_int_arg(argc, argv, i, "--window", cfg.window_size)) {}
-        else if (parse_int_arg(argc, argv, i, "--prefetch", cfg.prefetch_depth)) {}
-        else if (parse_int_arg(argc, argv, i, "--expert-cache", cfg.expert_cache)) {}
+        else if (parse_int_arg(argc, argv, i, "--swlp-window", cfg.window_size)) {}
+        else if (parse_int_arg(argc, argv, i, "--swlp-prefetch", cfg.prefetch_depth)) {}
+        else if (parse_int_arg(argc, argv, i, "--swlp-expert-cache", cfg.expert_cache)) {}
         else if (strcmp(argv[i], "--swlp-auto") == 0)       { cfg.window_size = -1; }
         else if (parse_int_arg(argc, argv, i, "--ctx", cfg.n_ctx)) {}
         else if (parse_int_arg(argc, argv, i, "--threads", cfg.n_threads)) {}

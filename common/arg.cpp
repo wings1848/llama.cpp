@@ -2375,6 +2375,13 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_SWLP_WINDOW"));
     add_opt(common_arg(
+        {"--swlp-auto"},
+        "SWLP: auto-select optimal window size (equivalent to --swlp-window -1)",
+        [](common_params & params) {
+            params.swlp_window_size = -1;
+        }
+    ));
+    add_opt(common_arg(
         {"--swlp-prefetch"}, "N",
         "SWLP: prefetch depth (layers ahead of current, default: 0)",
         [](common_params & params, const std::string & value) {

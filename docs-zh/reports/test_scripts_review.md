@@ -37,7 +37,7 @@ Approximately 75% of perf_test.py's logic is directly duplicated in comprehensiv
 | Line 218: `if ngl_ok(0, 0, n):` guarding CPU baseline test | **Always true** — `is_known_crash(0, 0, n)` always returns False because ngl=0 and window=0 satisfy neither crash condition. Dead guard. |
 | Lines 250–252: `def ngl_ok(ngl, window, n)` | Single-use wrapper around `is_known_crash()` — called only from the dead guard above. Entire function dead. |
 | Line 393: `rec["pp_tps_pp"] = d.get("pp_tps")` | **Duplicate key** — `pp_tps` is already captured on line 385 in the same block. Clearly a copy-paste artifact. |
-| `--expert-cache` in CLI (line 265) | Always passed with value 0 since perf tests never set `expert_cache` in test configs. Harmless but unnecessary. |
+| `--swlp-expert-cache` in CLI (line 265) | Always passed with value 0 since perf tests never set `expert_cache` in test configs. Harmless but unnecessary. |
 
 ### B.2 GPUMonitor — differences between the two scripts
 
