@@ -288,6 +288,24 @@ extern "C" {
         ggml_backend_buffer_type_t buft;
     };
 
+    // Sliding-Window Layer Pipeline (SWLP) configuration
+    // Enables dynamic layer streaming between CPU and GPU during inference.
+    // When window_size == 0, SWLP is disabled (default).
+    struct llama_swlp_params {
+        int32_t window_size;       // GPU layer sliding window (1-99, 0 = disabled)
+        int32_t prefetch_depth;    // prefetch layers ahead of current (0-9)
+        int32_t expert_cache_size; // per-layer expert cache for MoE (0-9, 0 = disabled)
+
+        bool expert_prefetch;  // enable expert prefetch via cross-layer gate prediction
+        bool use_pinned_copy;  // use pinned (page-locked) memory for faster CPU↔GPU DMA
+        bool async_migration;  // enable async PCIe pipelining (double-buffer + CUDA streams)
+        bool verbose;          // log SWLP layer migration activity
+        bool adaptive;         // enable adaptive window auto-tuning
+        float ewma_alpha;      // EWMA smoothing factor for adaptive tuning (0.1-1.0)
+        bool  alpha_auto;      // auto-select alpha based on model size (default true)
+        int32_t adapt_interval;// adaptive adjustment interval in decodes (0 = auto, default 0)
+    };
+
     struct llama_model_params {
         // NULL-terminated list of devices to use for offloading (if NULL, all available devices are used)
         ggml_backend_dev_t * devices;
@@ -382,6 +400,9 @@ extern "C" {
         bool kv_unified;  // use a unified buffer across the input sequences when computing the attention
                           // try to disable when n_seq_max > 1 for improved performance when the sequences do not share a large prefix
                           // ref: https://github.com/ggml-org/llama.cpp/pull/14363
+
+        // Sliding-Window Layer Pipeline configuration (0 window_size = disabled)
+        struct llama_swlp_params swlp;
 
         // [EXPERIMENTAL]
         // backend sampler chain configuration (make sure the caller keeps the sampler chains alive)

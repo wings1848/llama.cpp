@@ -35,6 +35,11 @@ add_library(llama
             llama-model.cpp
             llama-quant.cpp
             llama-sampler.cpp
+            llama-swlp.cpp
+            llama-swlp-adaptive.cpp
+            llama-swlp-migrate.cpp
+            llama-swlp-moe.cpp
+            llama-swlp-stats.cpp
             llama-vocab.cpp
             unicode-data.cpp
             unicode.cpp
@@ -51,6 +56,14 @@ set_target_properties(llama PROPERTIES
 target_include_directories(llama PRIVATE .)
 target_include_directories(llama PUBLIC ../include)
 target_compile_features   (llama PRIVATE cxx_std_17) # don't bump
+
+# Conditionally add CUDA graph support for SWLP
+if (GGML_CUDA)
+    target_sources(llama PRIVATE llama-swlp-cuda.cpp)
+    find_package(CUDAToolkit)
+    target_include_directories(llama PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    target_link_libraries(llama PRIVATE CUDA::cudart)
+endif()
 
 target_link_libraries(llama PUBLIC ggml)
 

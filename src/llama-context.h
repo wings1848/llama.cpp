@@ -2,6 +2,7 @@
 
 #include "llama.h"
 #include "llama-ext.h"
+#include "llama-swlp.h"
 #include "llama-cparams.h"
 #include "llama-graph.h"
 #include "llama-adapter.h"
@@ -185,6 +186,9 @@ struct llama_context {
 
     llama_memory_breakdown memory_breakdown() const;
 
+    // SWLP stats (no-op when swlp is null or disabled)
+    void maybe_print_swlp_stats() const;
+
     //
     // training
     //
@@ -271,6 +275,11 @@ private:
 
     llama_adapter_cvec_ptr  cvec;
     llama_adapter_loras_ptr loras;
+
+    llama_swlp_params swlp_params;  // SWLP streaming config
+
+    // SWLP engine (nullptr when disabled)
+    std::unique_ptr<llama_swlp> swlp;
 
     llama_cross cross; // TODO: tmp for handling cross-attention - need something better probably
 

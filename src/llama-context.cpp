@@ -97,6 +97,37 @@ llama_context::llama_context(
         cparams.ctx_other = params.ctx_other;
     }
 
+    // Store SWLP config
+    swlp_params = params.swlp;
+
+    // Initialize SWLP engine if enabled
+    if (swlp_params.window_size > 0) {
+        swlp = std::make_unique<llama_swlp>(swlp_params, model.hparams.n_layer_all);
+
+        // Check for unsupported configurations before initializing
+        if (swlp->is_enabled()) {
+            int ngl = model.n_gpu_layers();
+            if (ngl > 0 && ngl < model.hparams.n_layer_all) {
+                swlp->set_fixed_gpu_layers(ngl);
+            }
+        }
+
+        if (swlp && swlp->is_enabled()) {
+            swlp->analyze_model(model);
+            swlp->auto_tune_adaptive_params();
+            swlp->set_async_migration(swlp_params.async_migration);
+            swlp->set_model(&model);
+
+            LLAMA_LOG_INFO("%s: SWLP engine initialized (window=%d, prefetch=%d)\n",
+                __func__, swlp_params.window_size, swlp_params.prefetch_depth);
+        } else if (!swlp) {
+            // already warned above
+        } else {
+            LLAMA_LOG_INFO("%s: SWLP window_size=%d >= n_layers=%d, SWLP disabled\n",
+                __func__, swlp_params.window_size, model.hparams.n_layer_all);
+        }
+    }
+
     // Initialize backend samplers here so they are part of the sampling graph
     // before the reserve passes run later in this function. This avoids a later
     // re-reserve when graph nodes change.
@@ -256,6 +287,13 @@ llama_context::llama_context(
     if (!hparams.vocab_only) {
         // GPU backends
         for (const auto & dev : model.devices) {
+            // If ngl == 0 and SWLP is not enabled, skip GPU backend initialization to avoid zero-node CUDA scheduling crashes
+            if (model.n_gpu_layers() == 0 && (!swlp || !swlp->is_enabled())) {
+                auto dev_type = ggml_backend_dev_type(dev.dev);
+                if (dev_type == GGML_BACKEND_DEVICE_TYPE_GPU || dev_type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+                    continue;
+                }
+            }
             ggml_backend_t backend = ggml_backend_dev_init(dev.dev, nullptr);
             if (backend == nullptr) {
                 throw std::runtime_error(format("failed to initialize %s backend", ggml_backend_dev_name(dev.dev)));
@@ -281,6 +319,17 @@ llama_context::llama_context(
             throw std::runtime_error("failed to initialize CPU backend");
         }
         backends.emplace_back(backend_cpu);
+
+        // Configure SWLP with backends for tensor migration
+        if (swlp && swlp->is_enabled()) {
+            // Determine GPU backend (first non-CPU backend from model.devices)
+            ggml_backend_t gpu_backend = nullptr;
+            if (!model.devices.empty()) {
+                // The first device in model.devices is typically the GPU
+                gpu_backend = backends.front().get();
+            }
+            swlp->set_backends(gpu_backend, backend_cpu);
+        }
 
         // create a list of the set_n_threads functions in the backends
         for (auto & backend : backends) {
@@ -334,11 +383,22 @@ llama_context::llama_context(
             auto backend_type = ggml_backend_dev_type(ggml_backend_get_device(backend.get()));
 
             if (backend_type == GGML_BACKEND_DEVICE_TYPE_CPU && !model.devices.empty()) {
-                // use the host buffer of the first device CPU for faster transfer of the intermediate state
-                const auto & dev = model.devices[0];
-                auto * host_buft = ggml_backend_dev_host_buffer_type(dev.dev);
-                if (host_buft) {
-                    buft = host_buft;
+                // Only use the GPU host buffer if a GPU backend is actually initialized
+                bool has_gpu = false;
+                for (const auto & b : backends) {
+                    auto b_type = ggml_backend_dev_type(ggml_backend_get_device(b.get()));
+                    if (b_type == GGML_BACKEND_DEVICE_TYPE_GPU || b_type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+                        has_gpu = true;
+                        break;
+                    }
+                }
+                if (has_gpu) {
+                    // use the host buffer of the first device CPU for faster transfer of the intermediate state
+                    const auto & dev = model.devices[0];
+                    auto * host_buft = ggml_backend_dev_host_buffer_type(dev.dev);
+                    if (host_buft) {
+                        buft = host_buft;
+                    }
                 }
             }
 
@@ -1280,7 +1340,17 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
     // in order to correctly reuse a graph, it's full topology has to be uniquely determined by these parameters
     const auto gparams = graph_params(res, ubatch, mctx, gtype);
 
-    if (!graph_reuse_disable && res->can_reuse(gparams)) {
+    // If SWLP adaptive changed the window during graph reuse, force a rebuild.
+    // prepare_migration() runs inside the build_graph path; without a rebuild,
+    // window resizes from adapt_window() are recorded but have no effect on memory layout.
+    const bool swlp_force_rebuild = (swlp && swlp->is_enabled() && swlp->has_pending_window_change());
+    if (swlp_force_rebuild) {
+        // Don't call prepare_migration() here — the rebuild branch below will handle it.
+        // Calling it here would cause a double migration (prepare_layer runs during build_graph
+        // in the rebuild branch, which also calls prepare_migration).
+    }
+
+    if (!graph_reuse_disable && !swlp_force_rebuild && res->can_reuse(gparams)) {
         //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
 
         // with pipeline parallelism, the previous graph_compute_async may still be running
@@ -1300,6 +1370,13 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         //const auto t_start_us = ggml_time_us();
 
         gf = model.build_graph(gparams);
+
+        // Annotate graph with SWLP layer boundaries if SWLP is enabled
+        if (swlp && swlp->is_enabled()) {
+            swlp->annotate_graph(gf, model.hparams.n_layer_all);
+            swlp->prepare_migration();
+            swlp->ensure_window_ready();
+        }
 
         //LLAMA_LOG_INFO("graph build time: %.3f ms\n", (ggml_time_us() - t_start_us)/1000.0);
 
@@ -2283,6 +2360,14 @@ ggml_cgraph * llama_context::graph_reserve(
 
     this->n_outputs = save_n_outputs;
 
+    // Annotate graph with SWLP layer boundaries if SWLP is enabled to ensure correct GPU memory reservation
+    if (swlp && swlp->is_enabled()) {
+        swlp->annotate_graph(gf, model.hparams.n_layer_all);
+        if (!split_only) {
+            swlp->prepare_migration();
+        }
+    }
+
     // initialize scheduler with the specified graph
     if (split_only) {
         if (sizes) {
@@ -2342,9 +2427,42 @@ ggml_status llama_context::graph_compute(
         set_n_threads_fn.second(set_n_threads_fn.first, n_threads);
     }
 
+    // Set SWLP callback for inter-split layer migration
+    if (swlp && swlp->is_enabled()) {
+        ggml_backend_sched_set_swlp_callback(sched.get(),
+            [](int split_idx, void * user_data) {
+                auto * ctx = static_cast<llama_context*>(user_data);
+                if (ctx->swlp) {
+                    ctx->swlp->on_split_begin(split_idx);
+                }
+            }, this);
+    }
+
+    // Track forward pass time for adaptive SWLP window sizing
+    auto t_start = ggml_time_us();
     auto status = ggml_backend_sched_graph_compute_async(sched.get(), gf);
+    auto t_end = ggml_time_us();
     if (status != GGML_STATUS_SUCCESS) {
         LLAMA_LOG_ERROR("%s: ggml_backend_sched_graph_compute_async failed with error %d\n", __func__, status);
+    }
+
+    // Record per-layer timing for adaptive SWLP
+    if (swlp && swlp->is_enabled()) {
+        int64_t total_us = t_end - t_start;
+        swlp->record_compute_time(total_us);
+
+        int n_layers = model.hparams.n_layer_all;
+        if (n_layers > 0) {
+            int64_t per_layer_us = total_us / n_layers;
+            for (int il = 0; il < n_layers; il++) {
+                swlp->record_layer_timing(il, per_layer_us);
+            }
+            // Tell adaptive whether we are generating (single token) or processing a batch
+            swlp->record_forward_type(!batched);
+            swlp->adapt_window();
+            // Record MoE expert activations for SWLP expert cache
+            swlp->record_expert_activations();
+        }
     }
 
     // fprintf(stderr, "splits: %d\n", ggml_backend_sched_get_n_splits(sched));
@@ -2374,6 +2492,18 @@ llm_graph_cb llama_context::graph_get_cb() const {
                     }
                 }
             }
+        }
+
+        // SWLP: track layer usage for dynamic GPU/CPU streaming
+        if (swlp && swlp->is_enabled() && il >= 0 && strcmp(name, "norm") == 0) {
+            swlp->prepare_layer(il);
+            // Prepare MoE experts for this layer
+            swlp->prepare_layer_experts(il, (int)ubatch.n_tokens);
+        }
+
+        // SWLP: capture expert top-k tensors for activation tracking
+        if (swlp && swlp->is_enabled() && il >= 0 && strcmp(name, "ffn_moe_topk") == 0) {
+            swlp->annotate_expert_topk(il, cur);
         }
     };
 }
@@ -3127,6 +3257,12 @@ llama_memory_breakdown llama_context::memory_breakdown() const {
     return ret;
 }
 
+void llama_context::maybe_print_swlp_stats() const {
+    if (swlp && swlp->is_enabled() && swlp->is_verbose()) {
+        swlp->print_stats();
+    }
+}
+
 //
 // training
 //
@@ -3384,6 +3520,18 @@ llama_context_params llama_context_default_params() {
         /*.op_offload                  =*/ true,
         /*.swa_full                    =*/ true,
         /*.kv_unified                  =*/ false,
+        /*.swlp                        =*/ {
+            /*.window_size      =*/ 0,
+            /*.prefetch_depth   =*/ 1,
+            /*.expert_cache_size=*/ 0,
+            /*.expert_prefetch  =*/ false,
+            /*.use_pinned_copy  =*/ true,
+            /*.verbose          =*/ false,
+            /*.adaptive         =*/ true,
+            /*.ewma_alpha       =*/ 0.3f,
+            /*.alpha_auto       =*/ true,
+            /*.adapt_interval   =*/ 0,
+        },
         /*.sampler                     =*/ nullptr,
         /*.n_sampler                   =*/ 0,
         /*.ctx_other                   =*/ nullptr,
@@ -3949,6 +4097,9 @@ int32_t llama_decode(
     if (ret != 0 && ret != 1) {
         LLAMA_LOG_ERROR("%s: failed to decode, ret = %d\n", __func__, ret);
     }
+
+    // SWLP stats reporting
+    ctx->maybe_print_swlp_stats();
 
     return ret;
 }
