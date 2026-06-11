@@ -34,11 +34,12 @@ model_search_paths:
 # ---- Output directory (relative to cwd or absolute) ----
 output_dir: "./results"
 
-# ---- Monitoring (all optional) ----
+# ---- Monitoring (enabled by default when tools are available) ----
+# Use --no-gpu-mon / --no-mem-mon / --no-cpu-mon to disable.
 monitoring:
   gpu: true   # nvidia-smi polling (VRAM, temp, util)
-  mem: false  # psutil memory tracking (system + process RSS)
-  cpu: false  # psutil CPU utilization polling
+  mem: true   # psutil memory tracking (system + process RSS)
+  cpu: true   # psutil CPU utilization polling
 
 # =============================================================
 # Models

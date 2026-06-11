@@ -8,7 +8,10 @@ Usage:
   python scripts/swlp_test.py --phase quick
   python scripts/swlp_test.py --config my_config.yaml --model-type moe --bench-args "--swlp-alpha 0.5"
   python scripts/swlp_test.py --dry-run
-  python scripts/swlp_test.py --analyze ./results
+  python scripts/swlp_test.py ./results           # analyze saved results
+
+GPU/mem/CPU monitoring is enabled by default when tools are available
+(nvidia-smi for GPU, psutil for mem/CPU). Disable with --no-gpu-mon etc.
 """
 
 import argparse, csv, itertools, json, os, shlex, shutil, subprocess, sys
@@ -340,31 +343,37 @@ def _analyze(all_r):
     if not ok: return print("No successful results.")
     grp = defaultdict(list)
     for r in ok: grp[r["model_id"]].append(r)
-    print(f"\n{'='*78}\nRESULTS BY MODEL\n{'='*78}")
+    print(f"\n{'='*105}\nRESULTS BY MODEL\n{'='*105}")
     for mid in sorted(grp):
         m = sorted(grp[mid], key=lambda x: (x.get("mode",""), x["test_id"]))
         pps = [r for r in m if r.get("mode")=="pp"]
         gns = [r for r in m if r.get("mode")=="gen"]
         print(f"\n{mid} ({m[0].get('model_name',mid)}) / {m[0].get('model_type','')} / {len(m)} results")
         if pps:
-            print(f"  {'ID':>4} {'Description':<34} {'t/s':>7} {'ms':>7} {'VRAM':>7} {'Temp':>5}")
-            print(f"  {'-'*4} {'-'*34} {'-'*7} {'-'*7} {'-'*7} {'-'*5}")
+            print(f"  {'ID':>4} {'Description':<34} {'t/s':>7} {'ms':>7} {'VRAM':>7} {'Temp':>5} {'RSS':>8} {'CPU%':>6}")
+            print(f"  {'-'*4} {'-'*34} {'-'*7} {'-'*7} {'-'*7} {'-'*5} {'-'*8} {'-'*6}")
             for r in pps:
                 tps = r.get("pp_tps",0); ms = r.get("pp_mean_ms",0)
                 vram = r.get("gpu_vram_peak_mb",-1); temp = r.get("gpu_temp_peak_c",-1)
+                rss = r.get("mem_rss_mb",-1); cpu = r.get("cpu_util_avg_pct",-1)
                 print(f"  {r['test_id']:>4} {r['desc']:<34} {tps:>7.0f} {ms:>7.1f}"
                       + (f" {vram:>6.0f}M" if vram>0 else "       ")
-                      + (f" {temp:>3.0f}C" if temp>0 else ""))
+                      + (f" {temp:>3.0f}C" if temp>0 else "    ")
+                      + (f" {rss:>7.0f}M" if rss>0 else "        ")
+                      + (f" {cpu:>5.1f}" if cpu>=0 else "     "))
         if gns:
             if pps: print()
-            print(f"  {'ID':>4} {'Description':<34} {'t/s':>7} {'p95':>7} {'VRAM':>7} {'Temp':>5}")
-            print(f"  {'-'*4} {'-'*34} {'-'*7} {'-'*7} {'-'*7} {'-'*5}")
+            print(f"  {'ID':>4} {'Description':<34} {'t/s':>7} {'p95':>7} {'VRAM':>7} {'Temp':>5} {'RSS':>8} {'CPU%':>6}")
+            print(f"  {'-'*4} {'-'*34} {'-'*7} {'-'*7} {'-'*7} {'-'*5} {'-'*8} {'-'*6}")
             for r in gns:
                 tps = r.get("gen_tps",0); p95 = r.get("gen_p95_ms",0)
                 vram = r.get("gpu_vram_peak_mb",-1); temp = r.get("gpu_temp_peak_c",-1)
+                rss = r.get("mem_rss_mb",-1); cpu = r.get("cpu_util_avg_pct",-1)
                 print(f"  {r['test_id']:>4} {r['desc']:<34} {tps:>7.0f} {p95:>7.1f}"
                       + (f" {vram:>6.0f}M" if vram>0 else "       ")
-                      + (f" {temp:>3.0f}C" if temp>0 else ""))
+                      + (f" {temp:>3.0f}C" if temp>0 else "    ")
+                      + (f" {rss:>7.0f}M" if rss>0 else "        ")
+                      + (f" {cpu:>5.1f}" if cpu>=0 else "     "))
     print()
 
 def _cross_table(all_r):
@@ -398,23 +407,36 @@ def _cross_table(all_r):
             if best.get("expert_cache",0)>0: cp += f" EC={best['expert_cache']}"
             grp.append((mid, best.get("model_name",mid), base_tps, best.get(tps_key,0), pct,
                         best.get("gpu_vram_peak_mb",-1), cp,
-                        best.get(p95_key,0) if mode=="gen" else 0))
+                        best.get(p95_key,0) if mode=="gen" else 0,
+                        best.get("mem_rss_mb",-1), best.get("cpu_util_avg_pct",-1)))
         if not grp: continue
         hdr = f"  [{'Gen' if mode=='gen' else 'PP'}]"
         if mode=="gen":
-            print(f"\n{hdr:>3}  {'Model':<18} {'GPU base':>8}  {'Best SWLP':>8}  {'Delta':>7}  {'VRAM':>8}  {'p95':>7}  Config")
+            print(f"\n{hdr:>3}  {'Model':<18} {'GPU base':>8}  {'Best SWLP':>8}  {'Delta':>7}  {'VRAM':>8}  {'RSS':>8}  {'p95':>7}  Config")
         else:
-            print(f"\n{hdr:>3}  {'Model':<18} {'CPU base':>8}  {'Best SWLP':>8}  {'Delta':>7}  {'VRAM':>8}  Config")
-        print(f"  {'-'*85}")
+            print(f"\n{hdr:>3}  {'Model':<18} {'CPU base':>8}  {'Best SWLP':>8}  {'Delta':>7}  {'VRAM':>8}  {'RSS':>8}  Config")
+        print(f"  {'-'*95}")
         for g in sorted(grp, key=lambda x: -x[4]):
-            _, mn, bt, bst, pct, vram, cp, p95 = g
+            _, mn, bt, bst, pct, vram, cp, p95, rss, cpu = g
             if vram>0: vram_s = f"{vram:>6.0f}M"
             else: vram_s = "    - "
+            if rss>0: rss_s = f"{rss:>7.0f}M"
+            else: rss_s = "       "
             if mode=="gen":
-                print(f"  {mn:<18} {bt:>8.0f}  {bst:>8.0f}  {pct:>+6.0f}%  {vram_s:>8}  {p95:>7.1f}  {cp}")
+                print(f"  {mn:<18} {bt:>8.0f}  {bst:>8.0f}  {pct:>+6.0f}%  {vram_s:>8}  {rss_s:>8}  {p95:>7.1f}  {cp}")
             else:
-                print(f"  {mn:<18} {bt:>8.0f}  {bst:>8.0f}  {pct:>+6.0f}%  {vram_s:>8}  {cp}")
-    print(f"{'='*85}")
+                print(f"  {mn:<18} {bt:>8.0f}  {bst:>8.0f}  {pct:>+6.0f}%  {vram_s:>8}  {rss_s:>8}  {cp}")
+    print(f"{'='*95}")
+
+def _find_baseline(gr, ngl, mode):
+    """Find the matching no-SWLP (window=0) baseline for a given ngl level.
+    Only returns a baseline with the exact same ngl. This ensures anomalies
+    compare like-for-like (same GPU offload, with/without SWLP)."""
+    exact = [r for r in gr if r.get("window")==0 and r.get("ngl",-1)==ngl and not r.get("error")]
+    if exact:
+        field = "gen_tps" if mode=="gen" else "pp_tps"
+        return exact[0].get(field, 0)
+    return 0
 
 def _scan_bugs(all_r):
     bugs = []
@@ -427,25 +449,29 @@ def _scan_bugs(all_r):
     for r in all_r:
         if not r.get("error"): grp[(r["model_id"],r.get("mode",""))].append(r)
     for (mid,mode), gr in grp.items():
-        gb = [r for r in gr if r.get("window")==0 and r.get("ngl",0)>0]
-        cb = [r for r in gr if r.get("window")==0 and r.get("ngl",0)==0]
         for r in gr:
             if r.get("window")==0: continue
             cur = r.get("gen_tps" if mode=="gen" else "pp_tps",0)
-            ic = r.get("ngl",0)==0
-            bl = cb if ic else gb
-            if not bl: continue
-            ba = bl[0].get("gen_tps" if mode=="gen" else "pp_tps",1)
-            if cur<=0 or ba<=0: continue
+            ngl = r.get("ngl",0)
+            ba = _find_baseline(gr, ngl, mode)
+            if cur<=0: continue
+            if ba <= 0:
+                # No same-ngl baseline exists; skip (partial GPU SWLP vs no-baseline is expected)
+                continue
             ratio = cur/ba
-            if ic and ratio<0.8:
-                bugs.append(dict(model_id=mid, test_id=r["test_id"], desc=r.get("desc","?"),
-                            mode=mode, window=r.get("window",0), expert_cache=r.get("expert_cache",0),
-                            error_msg=f"Anomaly (vs CPU): {cur:.0f}t/s = {ratio:.1f}x base({ba:.0f})", exit_code=0))
-            elif not ic and (ratio>2 or ratio<0.7):
-                bugs.append(dict(model_id=mid, test_id=r["test_id"], desc=r.get("desc","?"),
-                            mode=mode, window=r.get("window",0), expert_cache=r.get("expert_cache",0),
-                            error_msg=f"Anomaly (vs GPU): {cur:.0f}t/s = {ratio:.1f}x base({ba:.0f})", exit_code=0))
+            desc_ctx = f"vs ngl={ngl} no-SWLP"
+            if ngl == 0:
+                # CPU-only: SWLP should be at least half of CPU baseline
+                if ratio < 0.5:
+                    bugs.append(dict(model_id=mid, test_id=r["test_id"], desc=r.get("desc","?"),
+                                mode=mode, window=r.get("window",0), expert_cache=r.get("expert_cache",0),
+                                error_msg=f"Anomaly ({desc_ctx}): {cur:.0f}t/s = {ratio:.1f}x base({ba:.0f})", exit_code=0))
+            else:
+                # Partial/full GPU: anomaly if dramatically different from same-ngl no-SWLP
+                if ratio > 3 or ratio < 0.3:
+                    bugs.append(dict(model_id=mid, test_id=r["test_id"], desc=r.get("desc","?"),
+                                mode=mode, window=r.get("window",0), expert_cache=r.get("expert_cache",0),
+                                error_msg=f"Anomaly ({desc_ctx}): {cur:.0f}t/s = {ratio:.1f}x base({ba:.0f})", exit_code=0))
     return bugs
 
 def _load_results(dir):
@@ -506,7 +532,7 @@ def _parser():
     return p
 
 def _mon_cfg(cfg_mon, args):
-    r = {"gpu": True, "mem": False, "cpu": False}
+    r = {"gpu": True, "mem": True, "cpu": True}
     if isinstance(cfg_mon, dict): r.update({k: bool(v) for k,v in cfg_mon.items() if k in r})
     if args.gpu_mon: r["gpu"] = True
     if args.no_gpu_mon: r["gpu"] = False

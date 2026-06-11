@@ -33,12 +33,30 @@
 
 ## 3. 已知限制
 
+* **小模型 Gen 性能倒挂**：对于 <1B 模型，SWLP 的层迁移开销超过 GPU 计算加速收益，导致生成速度低于纯 CPU。这是 PCIe 传输延迟与计算粒度不匹配的固有限制。建议 <1B 模型使用纯 CPU 或全 GPU 卸载。
+* **Partial GPU + SWLP 缺少无-SWLP 对照基线**：测试框架中 partial GPU（如 ngl=10）的 SWLP 测试缺少同 ngl 的无-SWLP 对照组，导致异常检测无法准确判断 SWLP 贡献。需要在测试套件中补充 partial GPU + 无 SWLP 的基础用例。
 * **Turing (SM 7.5) 架构限制**：部分较老的 GPU 架构对 CUDA Graph 捕获的支持存在物理缺陷，可能导致图重放失败。
 * **NGL=99 模式下显存无节省**：属于设计机制。如果通过 NGL 将所有层均一次性放置在 GPU，SWLP 会探测并将其标记为固定层，从而跳过任何驱逐和迁移过程以换取最高速度。
 
 ---
 
-## 4. 历史审查与修复日志
+## 4. 近期已修复问题（2026-06-11）
+
+| ID | 严重度 | 描述 | 文件 | 修复方式 |
+|:--:|:------:|------|------|---------|
+| C8 | 严重 | swlp-auto 因 `window_size > 0` 条件被排除 | `src/llama-context.cpp` | 改为 `!= 0` |
+| C9 | 低 | verbose 日志无迁移统计（evict/load 数量、耗时） | `src/llama-swlp-migrate.cpp` | 添加明细日志 |
+| T5 | 低 | 测试框架异常检测假阳性（跨 ngl 比较） | `scripts/swlp_test.py` | 精确同 ngl 比较 |
+| R1 | 中 | C++ 源码重构：拆分 llama-swlp.cpp 为 5 模块 | `src/` | 文件拆分 |
+| R2 | 低 | 死代码清理：`HYSTERESIS_THRESHOLD`, `bytes_copied`, `#if 0` | `src/llama-swlp*.cpp` | 移除 |
+| R3 | 低 | 根目录文档移至 docs-zh/ | 根目录 | 目录整理 |
+| R4 | 低 | 删除重复构建脚本 build_swlp_cuda.ps1 | 根目录 | 删除 |
+| C10 | 中 | async migration 未自动启用，导致 Gen 性能下降 24% | `src/llama-swlp.cpp` | `set_backends()` 中添加 CUDA 检测自动启用 |
+| T6 | 低 | swlp-bench 缺少 async-migration 参数支持 | `examples/swlp-test/swlp-bench.cpp` | 新增 `--async-migration` CLI 参数 |
+
+---
+
+## 5. 历史审查与修复日志
 
 关于本项目经历的所有缺陷审查（C1-C15、B1-B5、T1-T4 列表）及修复演进历史，请参见：
 * **[llama.cpp-swlp开发日志.md](history/llama.cpp-swlp开发日志.md)** (缺陷修复与日志归档)

@@ -24,6 +24,7 @@ struct bench_config {
     bool expert_prefetch  = false;
     bool adaptive         = false;
     bool use_pinned_copy  = false;
+    bool async_migration  = false;
     float ewma_alpha      = 0.3f;
     bool  alpha_auto      = true;
     int   adapt_interval  = 0;   // 0 = auto
@@ -62,6 +63,7 @@ static void print_usage(const char * prog) {
         "  --expert-prefetch   Enable MoE expert prefetch\n"
         "  --adaptive          Enable adaptive window tuning\n"
         "  --pinned            Enable pinned memory for DMA\n"
+        "  --async-migration   Enable async PCIe pipelining (CUDA streams)\n"
         "  --swlp-alpha F      EWMA smoothing factor (0.1-1.0, default: auto)\n"
         "  --swlp-adapt-interval N  Adaptive adjustment interval in decodes (default: auto)\n"
         "  --swlp-verbose      Enable SWLP migration logging\n"
@@ -236,6 +238,7 @@ int main(int argc, char ** argv) {
         else if (strcmp(argv[i], "--expert-prefetch") == 0) { cfg.expert_prefetch = true; }
         else if (strcmp(argv[i], "--adaptive") == 0)       { cfg.adaptive = true; }
         else if (strcmp(argv[i], "--pinned") == 0)         { cfg.use_pinned_copy = true; }
+        else if (strcmp(argv[i], "--async-migration") == 0) { cfg.async_migration = true; }
         else if (strcmp(argv[i], "--swlp-verbose") == 0)   { cfg.verbose = true; }
         else if (parse_int_arg(argc, argv, i, "--ngl", cfg.n_gpu_layers)) {}
         else if (parse_int_arg(argc, argv, i, "--window", cfg.window_size)) {}
@@ -315,6 +318,7 @@ int main(int argc, char ** argv) {
                 cfg.adapt_interval == 0 ? " (auto)" : "");
         }
         fprintf(stderr, "  Pinned:     %s\n", cfg.use_pinned_copy ? "ON" : "OFF");
+        fprintf(stderr, "  AsyncMig:   %s\n", cfg.async_migration ? "ON" : "OFF");
     }
     if (cfg.expert_cache > 0) {
         fprintf(stderr, "  ExpertCache: %d (NOTE: currently no-op, see docs-zh/llama.cpp-swlp综合测试报告v4.md)\n",
@@ -343,6 +347,7 @@ int main(int argc, char ** argv) {
         cparams.swlp.expert_prefetch  = cfg.expert_prefetch;
         cparams.swlp.adaptive         = cfg.adaptive;
         cparams.swlp.use_pinned_copy  = cfg.use_pinned_copy;
+        cparams.swlp.async_migration  = cfg.async_migration;
         cparams.swlp.verbose          = cfg.verbose;
         cparams.swlp.ewma_alpha       = cfg.ewma_alpha;
         cparams.swlp.alpha_auto       = cfg.alpha_auto;
@@ -470,6 +475,7 @@ int main(int argc, char ** argv) {
     fprintf_json_bool(out, "cfg_alpha_auto", cfg.alpha_auto);    fprintf(out, ",\n  ");
     fprintf_json_int(out, "cfg_adapt_interval", cfg.adapt_interval); fprintf(out, ",\n  ");
     fprintf_json_bool(out, "use_pinned_copy", cfg.use_pinned_copy); fprintf(out, ",\n  ");
+    fprintf_json_bool(out, "async_migration", cfg.async_migration); fprintf(out, ",\n  ");
     fprintf_json_int(out, "n_prompt_tokens", n_prompt);        fprintf(out, ",\n  ");
     fprintf_json_int(out, "n_iters", cfg.n_iters);             fprintf(out, ",\n  ");
     fprintf_json_int(out, "n_gen", cfg.n_gen);                 fprintf(out, ",\n  ");

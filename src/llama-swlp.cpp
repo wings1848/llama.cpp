@@ -293,6 +293,21 @@ void llama_swlp::set_backends(ggml_backend_t gpu, ggml_backend_t cpu) {
                 fixed_count, state->num_layers);
         }
     }
+
+    // Auto-enable async migration when CUDA is compiled in and a GPU backend is available.
+    // This overrides the default (false) so users get the 20%+ perf benefit without needing
+    // to pass --swlp-async-migration 1.  Users who explicitly pass --swlp-async-migration 0
+    // will see the "auto-enabling" log and can remove the flag to confirm the override.
+#ifdef GGML_USE_CUDA
+    if (state->backend_migration_ready && !state->async_migration_enabled) {
+        LLAMA_LOG_INFO("SWLP: CUDA backend detected, auto-enabling async migration\n");
+        set_async_migration(true);
+    }
+#else
+    if (state->async_migration_enabled) {
+        LLAMA_LOG_WARN("SWLP: async migration requires CUDA backend, ignoring setting\n");
+    }
+#endif
 }
 
 void llama_swlp::set_model(const llama_model * model) {

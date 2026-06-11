@@ -101,7 +101,7 @@ llama_context::llama_context(
     swlp_params = params.swlp;
 
     // Initialize SWLP engine if enabled
-    if (swlp_params.window_size > 0) {
+    if (swlp_params.window_size != 0) {
         swlp = std::make_unique<llama_swlp>(swlp_params, model.hparams.n_layer_all);
 
         // Check for unsupported configurations before initializing

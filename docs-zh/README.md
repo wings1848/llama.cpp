@@ -38,26 +38,17 @@ CPU驻留: [████████]               [████████] [
 
 SWLP 支持 Windows 环境下的 MSVC + CUDA 编译。
 
-### 构建脚本
-请使用工作区根目录下的规范构建脚本：
-* `build_swlp_cuda.ps1` (PowerShell，推荐)
-* `build_swlp_cuda.bat` (Batch)
-
 ### 构建命令
-```powershell
-# PowerShell（推荐 — 自动检测 VS 2022 版本，增量构建）
-powershell -File build_swlp_cuda.ps1
-
-# 全量清理并重建
-powershell -File build_swlp_cuda.ps1 -Clean
-
-# Batch 命令（增量构建）
+```cmd
+# 增量构建
 build_swlp_cuda.bat
 
-# Batch 命令（清理并重建）
+# 全量清理并重建
 build_swlp_cuda.bat --clean
 ```
 > ⚠️ **注意**：Git Bash 环境因 GCC/MSVC 编译器冲突无法直接构建，请使用 PowerShell 或 CMD 运行上述脚本。
+
+> ⚠️ PowerShell 用户请使用 `cmd /c build_swlp_cuda.bat` 或直接调用 MSVC 环境后运行 `cmake --build`。
 
 ---
 
@@ -70,19 +61,32 @@ build_swlp_cuda.bat --clean
 # 基准测试（设置窗口大小为 8，预取深度 1）
 .\build_cuda_swlp\bin\llama-swlp-bench.exe <model_path> --ngl 0 --window 8 --prefetch 1
 
-# 自适应窗口模式
-.\build_cuda_swlp\bin\llama-swlp-bench.exe <model_path> --ngl 0 --window -1 --swlp-adaptive 1
+# 自动窗口模式（根据模型层数自动计算）
+.\build_cuda_swlp\bin\llama-swlp-bench.exe <model_path> --ngl 0 --swlp-auto --prefetch 1
+
+# 自适应窗口模式（EWMA 动态调节）
+.\build_cuda_swlp\bin\llama-swlp-bench.exe <model_path> --ngl 0 --window 4 --adaptive --prefetch 1
+
+# 查看详细迁移日志
+.\build_cuda_swlp\bin\llama-swlp-bench.exe <model_path> --ngl 0 --window 4 --prefetch 1 --swlp-verbose
+
+# 启用异步 PCIe 传输流水线（bench 工具不会自动启用，需显式传递）
+.\build_cuda_swlp\bin\llama-swlp-bench.exe <model_path> --ngl 0 --window 8 --prefetch 1 --async-migration
 ```
+> **注意**：使用 `--swlp-auto` 时，窗口大小自动设为 `max(2, min(n_layers-1, n_layers * 40%))`。
 
 ### 3.2 运行主程序 (cli / server)
 在 `llama-cli` 或 `llama-server` 中，可以通过命令行参数启用 SWLP：
 ```powershell
 # 启用 8 层滑动窗口，异步 PCIe 迁移，将 0 层固定在 GPU (全 CPU 起步滑动)
-.\build_cuda_swlp\bin\llama-cli.exe -m <model_path> --window 8 --swlp-async-migration 1 --ngl 0 -p "Hello"
+# 异步迁移在 CUDA 后端可用时会自动启用，无需显式 --swlp-async-migration 1
+.\build_cuda_swlp\bin\llama-cli.exe -m <model_path> --window 8 --ngl 0 -p "Hello"
 
 # 部分 GPU 卸载 (例如固定前 16 层在 GPU，其余层通过窗口滑动管理)
-.\build_cuda_swlp\bin\llama-cli.exe -m <model_path> --window 8 --swlp-async-migration 1 --ngl 16 -p "Hello"
+.\build_cuda_swlp\bin\llama-cli.exe -m <model_path> --window 8 --ngl 16 -p "Hello"
 ```
+
+> **自动启用以来的变化 (2026-06-11)**：自该版本起，SWLP 检测到 CUDA 后端可用时会自动启用异步迁移（`async_migration = true`）。用户不再需要传递 `--swlp-async-migration 1`。如因调试需要强制禁用异步迁移，传递 `--swlp-async-migration 0` 后日志会有明确提示说明已被自动覆盖。
 
 ---
 
@@ -98,6 +102,8 @@ build_swlp_cuda.bat --clean
 | **稀疏模型 (Dense)** | 7B+ | 4-8 | 1 | **开** | - | 关 |
 | **MoE (≤4 激活专家)** | 任意 | 4 | 1 | **开** | 2 | 关 |
 | **MoE (>4 激活专家)** | 任意 | 4 | 1 | 关 | 4 | **开** |
+
+> **异步迁移 (async_migration)**：自 2026-06-11 起，CUDA 后端编译下会自动启用，无需额外参数。
 
 ### 通用优化规则
 1. **预取深度**：推荐设置 `prefetch=1`（最平衡）。设为 0 会降低吞吐，设为 2 可能会导致 PCIe 拥堵，在部分模型上产生反效果。
@@ -133,12 +139,13 @@ $$\text{VRAM}_{\text{active}} = \text{VRAM}_{\text{非层张量}} + \sum_{il \in
 
 ### 6.1 核心参数（`llama-cli` / `llama-server`）
 * `--window N`：GPU 层滑动窗口大小（0 表示禁用，-1 表示根据模型层数自动计算）。
+* `--swlp-auto`：自动窗口模式，等同于 `--window -1`。
 * `--swlp-prefetch N`：预取未来层数（默认 1）。
 * `--swlp-adaptive 0\|1`：是否开启自适应窗口大小调节（默认 1）。
-* `--swlp-async-migration 0\|1`：是否启用异步 PCIe 传输流水线（默认 0，设为 1 利用 CUDA 多流重叠传输与计算）。
+* `--swlp-async-migration 0\|1`：是否启用异步 PCIe 传输流水线（CUDA 后端可用时自动启用，无需显式设置）。开启后利用 CUDA 多流重叠传输与计算。
 * `--swlp-expert-cache N`：MoE 专家缓存容量（0 表示禁用，仅对 MoE 架构有效）。
 * `--swlp-pinned-copy 0\|1`：是否对 PCIe 拷贝使用锁页内存 (Pinned Memory)（默认 1）。
-* `--swlp-verbose 0\|1`：是否打印详细的迁移和流转日志。
+* `--swlp-verbose`：打印详细的迁移和流转日志（包含 evict/load 数量、迁移耗时）。
 
 ### 6.2 环境变量
 * `GGML_CUDA_FORCE_STREAMS`：设置为非零值以覆盖/硬编码 CUDA 流配置。

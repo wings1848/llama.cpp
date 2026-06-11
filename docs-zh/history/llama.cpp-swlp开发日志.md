@@ -68,3 +68,30 @@
 * **文件位置**：`swlp-bench.cpp`
 * **问题描述**：每次 Token 生成均遍历整个词汇表执行最大值比较，造成了巨大的主线程 CPU 计算污染。
 * **当前状态**：*待处理*（计划替换为 `std::max_element` 向量检索）
+
+---
+
+## 4. 代码重构与工程优化归档（2026-06-11）
+
+### C8 [严重] — swlp-auto 模式因创建条件错误无法初始化
+* **文件位置**：`src/llama-context.cpp:105`
+* **问题描述**：SWLP 上下文创建条件为 `swlp_params.window_size > 0`。自动窗口模式使用 `window_size = -1` 作为标记值，`-1 > 0` 为 false，导致 `llama_swlp` 实例从未被创建。此时即使 bench 显示 `SWLP: ON`，实际没有任何迁移逻辑运行，性能等同纯 CPU 推理。
+* **修复方案**：将条件改为 `swlp_params.window_size != 0`，使 `window_size = -1`（auto）也能正确初始化 SWLP 引擎。
+* **影响**：修复后 auto 模式在 0.5B 模型上 Prompt Processing 从 327 t/s 提升至 628 t/s（+92%）。
+* **当前状态**：**已修复** (2026-06-11)
+
+### C9 [低] — SWLP verbose 日志缺乏迁移统计
+* **文件位置**：`src/llama-swlp-migrate.cpp` — `prepare_migration()`
+* **问题描述**：verbose 模式下仅输出 `window [start,end) pf+X, N/M layers on GPU`，缺少关键迁移明细：本次迁移了多少层（evict/load 分别计数）、迁移总耗时、每层迁移字节数。不利于性能调优和问题排查。
+* **修复方案**：在 `prepare_migration()` 的 verbose 分支中添加 evict 数量、load 数量、迁移总耗时（含 `full`/`incremental` 标记）。
+* **当前状态**：**已修复** (2026-06-11)
+
+### T5 [低] — 测试框架异常检测假阳性
+* **文件位置**：`scripts/swlp_test.py` — `_scan_bugs()`
+* **问题描述**：原始异常检测将 partial GPU 配置（如 ngl=10 + SWLP）与全 GPU 基线（ngl=99）比较，报告 `0.3x base` 为异常。实际上 partial GPU + SWLP 的性能介于 CPU 和全 GPU 之间，属于预期行为。
+* **修复方案**：
+  1. 新增 `_find_baseline()` 函数，仅查找与 SWLP 测试相同 ngl 的无-SWLP 基线。
+  2. 若无匹配基线（如 partial GPU 缺少对应无 SWLP 对照测试），跳过异常检测。
+  3. CPU-only SWLP（ngl=0）比较阈值放宽至 ratio < 0.5。
+  4. Partial GPU SWLP 比较阈值放宽至 ratio < 0.3 或 > 3。
+* **当前状态**：**已修复** (2026-06-11)

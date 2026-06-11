@@ -34,10 +34,42 @@
 
 ### 3.1 开启 SWLP 后，生成速度 (TPS) 极慢或发生卡顿
 * **可能原因 1**：没有开启异步迁移流水线。如果不开启异步，权重拷贝（H2D）会完全阻塞主线程的推理计算。
-  * **解决方案**：在运行命令行中，必须显式加上 `--swlp-async-migration 1` 启用流水线重叠。
+  * **解决方案**：自 2026-06-11 起，CUDA 后端编译下异步迁移会自动启用。如果您使用此版本之前的代码，需显式加上 `--swlp-async-migration 1`。如果日志显示 `SWLP: async migration disabled`，请确认：
+    1. 使用 CUDA 后端编译（`-DGGML_CUDA=ON`）。
+    2. 运行 `llama-swlp-bench` 时传递 `--async-migration` 参数（bench 工具不会自动启用）。
 * **可能原因 2**：硬件物理限制（主板 PCIe 带宽极低）。SWLP 的核心原理是利用计算隐藏 PCIe 拷贝延迟，单通道 DDR4 内存或主板 PCIe 插槽运行在低速模式（如 PCIe 3.0 x2 或 x4）会导致传输瓶颈无法被掩盖。
   * **解决方案**：
     1. 确保显卡插在主板满速的主 PCIe 插槽中（PCIe 3.0/4.0 x16）。
     2. 检查 CPU 内存是否运行在双通道模式下（单通道 RAM 会极大地拉低从 CPU 侧读取权重的速度）。
 * **可能原因 3**：窗口设置太小导致频繁发生 GPU 内存重分配。
   * **解决方案**：适当加大窗口（如 `--window 8`），这会在占用稍微多一点显存的前提下，大幅减少指针失效与显存分配的额外开销。
+
+### 3.5 使用 `--swlp-auto`（自动窗口）后性能没有提升
+* **现象**：开启 `--swlp-auto` 后，Prompt Processing 速度与纯 CPU 推理几乎相同（如 327 t/s vs 317 t/s），`--swlp-verbose` 无任何 SWLP 日志输出。
+* **可能原因**：
+  * **旧版本 bug**（2026-06-11 之前）：`llama_context` 初始化 SWLP 的创建条件为 `window_size > 0`，但 auto 模式使用 `window_size = -1` 作为标记值，`-1 > 0` 为 false，导致 SWLP 引擎从未被创建。
+  * **解决方案**：更新代码至最新版本（commit `ecd4c35` 之后），此 bug 已修复。
+* **验证方法**：使用 `--swlp-verbose` 运行，若看到以下日志则 SWLP 正确初始化：
+  ```
+  SWLP: analyzed model: ...
+  SWLP: backend migration ready (GPU backend available)
+  SWLP: window moved to [1, 10) for layer 9
+  ```
+
+### 3.3 swlp-bench 测试中 async migration 显示 disabled
+* **现象**：使用 `llama-swlp-bench` 进行性能测试时，日志显示 `SWLP: async migration disabled`，即使有 CUDA 后端。
+* **原因**：`llama-swlp-bench` 不会像主程序那样自动启用异步迁移，且该工具旧版完全未支持 `--async-migration` 参数。
+* **解决方案**：
+  1. 确认使用最新代码（包含 `--async-migration` 支持的版本）。
+  2. 运行测试时加上 `--async-migration`：
+     ```bash
+     ./llama-swlp-bench model.gguf --window 8 --prefetch 1 --async-migration
+     ```
+  3. 日志应显示 `SWLP: async migration enabled`。
+
+### 3.4 小模型上 SWLP Gen 速度反而低于纯 CPU
+* **现象**：对于 <1B 的小模型，开启 SWLP 后生成（Generation）速度比纯 CPU 更慢（如 64 t/s vs 83 t/s）。
+* **原因**：小模型每层计算时间极短（微秒级），而 SWLP 的 GPU 层迁移（evict/load）引入毫秒级开销。迁移开销 > GPU 加速收益，导致净性能下降。
+* **推荐方案**：
+  * 小模型（<1B）建议关闭 SWLP（`--window 0`），直接使用纯 CPU 或全 GPU 卸载（`--ngl 99`）。
+  * 对于 3B+ 模型，SWLP 的 Gen 收益才会转为正数。模型越大，收益越明显。

@@ -315,12 +315,35 @@ void llama_swlp::prepare_migration() {
 
     if (verbose) {
         int gpu_count = 0;
+        int evict_count = 0;
+        int load_count = 0;
         for (int il = 0; il < state->num_layers; il++) {
             if (state->layer_in_gpu[il]) gpu_count++;
         }
-        LLAMA_LOG_INFO("SWLP: window [%d,%d) pf+%d, %d/%d layers on GPU (%s)\n",
-            w_start, w_end, state->prefetch_depth, gpu_count, state->num_layers,
-            is_first_migration ? "full" : "incremental");
+        // Count migrations in this call by comparing prev vs current GPU state
+        for (int il = evict_start; il < evict_end; il++) {
+            if (il >= state->fixed_gpu_layers && !state->layer_fixed_gpu[il]) {
+                if (il >= w_start && il < pf_end) continue; // still in window
+                if (state->layer_in_gpu[il]) { /* would be evicted */ evict_count++; }
+            }
+        }
+        for (int il = load_start; il < load_end; il++) {
+            if (il >= state->fixed_gpu_layers && !state->layer_fixed_gpu[il]) {
+                if (!state->layer_in_gpu[il]) { /* would be loaded */ load_count++; }
+            }
+        }
+        if (evict_count > 0 || load_count > 0) {
+            LLAMA_LOG_INFO("SWLP: window [%d,%d) pf+%d, migrate %d evict + %d load = %d layers (%s, %.1f ms)\n",
+                w_start, w_end, state->prefetch_depth,
+                evict_count, load_count, evict_count + load_count,
+                is_first_migration ? "full" : "incremental",
+                state->last_migration_us / 1000.0);
+        } else {
+            LLAMA_LOG_INFO("SWLP: window [%d,%d) pf+%d, %d/%d layers on GPU (%s, %.1f ms, no migration needed)\n",
+                w_start, w_end, state->prefetch_depth, gpu_count, state->num_layers,
+                is_first_migration ? "full" : "incremental",
+                state->last_migration_us / 1000.0);
+        }
     }
 
     state->last_migration_us = ggml_time_us() - t0;

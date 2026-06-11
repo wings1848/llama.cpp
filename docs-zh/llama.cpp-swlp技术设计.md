@@ -143,7 +143,7 @@ SWLP 与 `llama-context.cpp` 的推理主循环高内聚集成：
 * 处于该状态的层在迁移周期内被自动豁免，以保障多后端协同的逻辑健壮性。
 
 ### 5.2 异步迁移流同步 (v7 Pipeline)
-通过 `--swlp-async-migration 1` 启用异步传输通道：
+异步传输通道通过 `--swlp-async-migration 1` 启用（自 2026-06-11 起，CUDA 后端编译下自动启用）。
 * **计算流 (S_compute)**：在默认流上执行 GPU 计算 Kernel。
 * **迁移流 (S_migrate)**：专门开辟一条非阻塞 CUDA 拷贝流负责 H2D 数据流动。
 * **同步设计**：
