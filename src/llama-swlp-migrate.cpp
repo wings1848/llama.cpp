@@ -300,6 +300,8 @@ void llama_swlp::prepare_migration() {
     const int  load_start   = std::max(state->fixed_gpu_layers, w_start);
     const int  load_end     = std::min(state->num_layers,        pf_end);
 
+    int64_t copies_before = state->copy_count;
+
     // Evict layers that should no longer be on GPU
     migrate_evict_range(evict_start, evict_end, w_start, pf_end);
 
@@ -313,41 +315,38 @@ void llama_swlp::prepare_migration() {
     state->migration_initialized   = true;
     state->last_migrated_window    = w_end - w_start;
 
-    if (verbose) {
-        int gpu_count = 0;
-        int evict_count = 0;
-        int load_count = 0;
-        for (int il = 0; il < state->num_layers; il++) {
-            if (state->layer_in_gpu[il]) gpu_count++;
-        }
-        // Count migrations in this call by comparing prev vs current GPU state
-        for (int il = evict_start; il < evict_end; il++) {
-            if (il >= state->fixed_gpu_layers && !state->layer_fixed_gpu[il]) {
-                if (il >= w_start && il < pf_end) continue; // still in window
-                if (state->layer_in_gpu[il]) { /* would be evicted */ evict_count++; }
-            }
-        }
-        for (int il = load_start; il < load_end; il++) {
-            if (il >= state->fixed_gpu_layers && !state->layer_fixed_gpu[il]) {
-                if (!state->layer_in_gpu[il]) { /* would be loaded */ load_count++; }
-            }
-        }
-        if (evict_count > 0 || load_count > 0) {
-            LLAMA_LOG_INFO("SWLP: window [%d,%d) pf+%d, migrate %d evict + %d load = %d layers (%s, %.1f ms)\n",
-                w_start, w_end, state->prefetch_depth,
-                evict_count, load_count, evict_count + load_count,
-                is_first_migration ? "full" : "incremental",
-                state->last_migration_us / 1000.0);
-        } else {
-            LLAMA_LOG_INFO("SWLP: window [%d,%d) pf+%d, %d/%d layers on GPU (%s, %.1f ms, no migration needed)\n",
-                w_start, w_end, state->prefetch_depth, gpu_count, state->num_layers,
-                is_first_migration ? "full" : "incremental",
-                state->last_migration_us / 1000.0);
-        }
-    }
+    int64_t copies_after = state->copy_count;
+    bool migrated = (copies_after > copies_before);
 
+    // Record timing BEFORE logging so the log shows the current migration duration
     state->last_migration_us = ggml_time_us() - t0;
     state->cumulative_migrate_us += state->last_migration_us;
+    float migrate_ms = state->last_migration_us / 1000.0f;
+
+    int gpu_count = 0;
+    for (int il = 0; il < state->num_layers; il++) {
+        if (state->layer_in_gpu[il]) gpu_count++;
+    }
+
+    if (migrated) {
+        LLAMA_LOG_INFO("SWLP: window [%d,%d) pf+%d, %d/%d layers on GPU (%s, %.1f ms, %d migrations)\n",
+            w_start, w_end, state->prefetch_depth, gpu_count, state->num_layers,
+            is_first_migration ? "full" : "incremental",
+            migrate_ms,
+            copies_after - copies_before);
+        // Migration vs compute overhead ratio (using cumulative averages)
+        if (state->cumulative_compute_us > 0) {
+            float migrate_avg = state->cumulative_migrate_us / 1000.0f;
+            float compute_avg = state->cumulative_compute_us / 1000.0f;
+            float ratio = 100.0f * state->cumulative_migrate_us / state->cumulative_compute_us;
+            LLAMA_LOG_INFO("  SWLP: migrate_total=%.1fms compute_total=%.1fms ratio=%.0f%%\n",
+                migrate_avg, compute_avg, ratio);
+        }
+    } else if (verbose) {
+        LLAMA_LOG_INFO("SWLP: window [%d,%d) pf+%d, %d/%d layers on GPU (%s, %.1f ms, no migration)\n",
+            w_start, w_end, state->prefetch_depth, gpu_count, state->num_layers,
+            is_first_migration ? "full" : "incremental", migrate_ms);
+    }
 }
 
 void llama_swlp::ensure_window_ready() {

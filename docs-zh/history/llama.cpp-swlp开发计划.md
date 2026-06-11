@@ -79,7 +79,7 @@
 
 ### 问题 6：构建脚本重复
 
-`build_swlp_cuda.bat` (93行) 和 `build_swlp_cuda.ps1` (83行) 功能几乎完全相同，都需要在修改构建参数时同步更新两份。
+`build_swlp_cuda.ps1` (93行) 和 `build_swlp_cuda.ps1` (83行) 功能几乎完全相同，都需要在修改构建参数时同步更新两份。
 
 ### 问题 7：`common/arg.cpp` 中SWLP参数分散
 
@@ -147,9 +147,9 @@ struct llama_layer {
 
 #### B.2 构建脚本合并
 
-删除 `build_swlp_cuda.ps1`，在 `build_swlp_cuda.bat` 中同时支持 cmd 和参数传递。或者只保留一个，因为 CMakeLists.txt 已经是最权威的构建定义。
+删除 `build_swlp_cuda.ps1`，在 `build_swlp_cuda.ps1` 中同时支持 cmd 和参数传递。或者只保留一个，因为 CMakeLists.txt 已经是最权威的构建定义。
 
-**建议**: 保留 `build_swlp_cuda.bat`（Windows上更通用），删除 `.ps1`。
+**建议**: 保留 `build_swlp_cuda.ps1`（Windows上更通用），删除 `.ps1`。
 
 #### B.3 项目文档整理
 
@@ -269,7 +269,7 @@ examples/
     swlp-bench.cpp
     CMakeLists.txt
 
-build_swlp_cuda.bat           # 保留，删除 build_swlp_cuda.ps1
+build_swlp_cuda.ps1           # 保留，删除 build_swlp_cuda.ps1
 
 docs-zh/
   history/                    # 开发历史文档
@@ -472,7 +472,7 @@ docs-zh/
 - `examples/swlp-test/` - 全部不变
 - `include/llama.h` - 不变
 - `ggml/` 下所有文件 - 不变
-- `build_swlp_cuda.bat` - 保留
+- `build_swlp_cuda.ps1` - 保留
 - `docs-zh/` 下技术文档 - 不变
 
 ---
