@@ -1396,6 +1396,9 @@ struct ggml_backend_cuda_context {
     cudaStream_t streams[GGML_CUDA_MAX_DEVICES][GGML_CUDA_MAX_STREAMS] = { { nullptr } };
     cublasHandle_t cublas_handles[GGML_CUDA_MAX_DEVICES] = {nullptr};
 
+    // Dedicated migration stream for async H2D/D2H copies (PCIe pipelining)
+    cudaStream_t migration_streams[GGML_CUDA_MAX_DEVICES] = { nullptr };
+
     int curr_stream_no = 0;
 
 #ifdef USE_CUDA_GRAPH
@@ -1468,6 +1471,16 @@ struct ggml_backend_cuda_context {
     }
 
     cudaStream_t stream() { return stream(device, curr_stream_no); }
+
+    cudaStream_t migration_stream(int device) {
+        if (migration_streams[device] == nullptr) {
+            ggml_cuda_set_device(device);
+            CUDA_CHECK(cudaStreamCreateWithFlags(&migration_streams[device], cudaStreamNonBlocking));
+        }
+        return migration_streams[device];
+    }
+
+    cudaStream_t migration_stream() { return migration_stream(device); }
 
     ggml_cuda_stream_context & stream_context() { return concurrent_stream_context; }
 

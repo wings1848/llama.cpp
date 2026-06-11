@@ -1586,6 +1586,19 @@ struct llama_context_params common_context_params_to_llama(const common_params &
     cparams.swa_full          = params.swa_full;
     cparams.kv_unified        = params.kv_unified;
 
+    // SWLP params
+    cparams.swlp.window_size       = params.swlp_window_size;
+    cparams.swlp.prefetch_depth    = params.swlp_prefetch_depth;
+    cparams.swlp.expert_cache_size = params.swlp_expert_cache_size;
+    cparams.swlp.expert_prefetch   = params.swlp_expert_prefetch;
+    cparams.swlp.use_pinned_copy   = params.swlp_use_pinned_copy;
+    cparams.swlp.async_migration   = params.swlp_async_migration;
+    cparams.swlp.verbose           = params.swlp_verbose;
+    cparams.swlp.adaptive          = params.swlp_adaptive;
+    cparams.swlp.ewma_alpha        = params.swlp_ewma_alpha;
+    cparams.swlp.alpha_auto        = params.swlp_alpha_auto;
+    cparams.swlp.adapt_interval    = params.swlp_adapt_interval;
+
     cparams.type_k = params.cache_type_k;
     cparams.type_v = params.cache_type_v;
 

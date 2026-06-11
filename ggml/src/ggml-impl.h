@@ -11,6 +11,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#ifdef __cplusplus
+#include <vector>
+#endif
 
 #ifdef __ARM_FEATURE_SVE
 #include <arm_sve.h>
@@ -344,6 +347,10 @@ struct ggml_cgraph {
     // an optional identifier that can be utilized to recognize same graphs if two non-zero values match
     // a value of 0 means it is not set and should be ignored
     uint64_t uid;
+
+    struct {
+        void * layer_nodes;
+    } swlp;
 };
 
 // returns a slice of cgraph with nodes [i0, i1)

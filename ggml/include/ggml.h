@@ -208,7 +208,10 @@
 #    define _WIN32_WINNT 0x0A00
 #endif
 
+// MSVC does not provide <stdbool.h> in C++ mode; bool is a built-in keyword
+#ifndef __cplusplus
 #include <stdbool.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>

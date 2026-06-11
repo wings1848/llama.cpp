@@ -548,6 +548,19 @@ struct common_params {
     bool swa_full          = false; // use full-size SWA cache (https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)
     bool kv_unified        = false; // enable unified KV cache
 
+    // SWLP (Sliding-Window Layer Pipeline) parameters
+    int32_t swlp_window_size       = 0;    // GPU layer sliding window (0 = disabled)
+    int32_t swlp_prefetch_depth    = 0;    // prefetch ahead layers
+    int32_t swlp_expert_cache_size = 0;    // per-layer expert cache for MoE (0 = disabled)
+    bool    swlp_expert_prefetch   = false; // enable expert prefetch
+    bool    swlp_use_pinned_copy   = false; // use pinned memory for DMA
+    bool    swlp_async_migration   = false; // async PCIe pipelining (double-buffer + CUDA streams)
+    bool    swlp_verbose           = false; // log SWLP activity
+    bool    swlp_adaptive          = false; // enable adaptive window sizing
+    float   swlp_ewma_alpha        = 0.3f;  // EWMA smoothing factor for adaptive tuning
+    bool    swlp_alpha_auto        = true;  // auto-select alpha based on model size
+    int32_t swlp_adapt_interval    = 0;     // adaptive adjustment interval (0 = auto)
+
     bool input_prefix_bos  = false; // prefix BOS to user inputs, preceding input_prefix
     bool use_mmap          = true;  // enable mmap to use filesystem cache
     bool use_direct_io     = false; // read from disk without buffering

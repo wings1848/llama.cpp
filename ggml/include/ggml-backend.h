@@ -351,6 +351,10 @@ extern "C" {
     // Set a callback to be called for each resulting node during graph compute
     GGML_API void                 ggml_backend_sched_set_eval_callback(ggml_backend_sched_t sched, ggml_backend_sched_eval_callback callback, void * user_data);
 
+    typedef void (*ggml_backend_sched_swlp_callback)(int split_idx, void * user_data);
+
+    GGML_API void                 ggml_backend_sched_set_swlp_callback(ggml_backend_sched_t sched, ggml_backend_sched_swlp_callback callback, void * user_data);
+
     //
     // Meta backend
     //

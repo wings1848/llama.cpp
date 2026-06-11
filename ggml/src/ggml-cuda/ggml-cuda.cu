@@ -616,6 +616,9 @@ ggml_backend_cuda_context::~ggml_backend_cuda_context() {
         if (cublas_handles[i] != nullptr) {
             CUBLAS_CHECK(cublasDestroy(cublas_handles[i]));
         }
+        if (migration_streams[i] != nullptr) {
+            CUDA_CHECK(cudaStreamDestroy(migration_streams[i]));
+        }
     }
 }
 
@@ -3290,6 +3293,70 @@ static void ggml_backend_cuda_synchronize(ggml_backend_t backend) {
     CUDA_CHECK(cudaStreamSynchronize(cuda_ctx->stream()));
 
     GGML_UNUSED(backend);
+}
+
+// ---- Async migration (PCIe pipelining) ----
+
+// H2D copy on the dedicated migration stream (not the compute stream).
+// The caller must record a migration event and wait on the compute stream
+// before the tensor is used for GPU computation.
+void ggml_backend_cuda_set_tensor_migrate_async(
+    ggml_backend_t backend, ggml_tensor * tensor,
+    const void * data, size_t offset, size_t size)
+{
+    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
+    ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
+
+    GGML_ASSERT(buf->buft == ggml_backend_cuda_buffer_type(cuda_ctx->device) && "unsupported buffer type");
+
+    CUDA_CHECK(cudaMemcpyAsync(
+        (char *) tensor->data + offset, data, size,
+        cudaMemcpyHostToDevice, cuda_ctx->migration_stream()));
+}
+
+// D2H copy on the dedicated migration stream.
+void ggml_backend_cuda_get_tensor_migrate_async(
+    ggml_backend_t backend, const ggml_tensor * tensor,
+    void * data, size_t offset, size_t size)
+{
+    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
+    ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
+
+    GGML_ASSERT(buf->buft == ggml_backend_cuda_buffer_type(cuda_ctx->device) && "unsupported buffer type");
+
+    CUDA_CHECK(cudaMemcpyAsync(
+        data, (const char *) tensor->data + offset, size,
+        cudaMemcpyDeviceToHost, cuda_ctx->migration_stream()));
+}
+
+// Record a CUDA event on the migration stream.
+// The event can later be waited on the compute stream via wait_migration_event.
+void * ggml_backend_cuda_migrate_event_create(ggml_backend_t backend) {
+    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
+    ggml_cuda_set_device(cuda_ctx->device);
+
+    cudaEvent_t event = nullptr;
+    CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+    return (void *) event;
+}
+
+void ggml_backend_cuda_migrate_event_destroy(void * event) {
+    if (event) {
+        CUDA_CHECK(cudaEventDestroy((cudaEvent_t) event));
+    }
+}
+
+void ggml_backend_cuda_migrate_event_record(ggml_backend_t backend, void * event) {
+    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
+    CUDA_CHECK(cudaEventRecord((cudaEvent_t) event, cuda_ctx->migration_stream()));
+}
+
+// Insert a wait on the compute stream for a migration event.
+// This ensures all H2D copies on the migration stream are complete
+// before the compute stream uses the migrated tensors.
+void ggml_backend_cuda_wait_migration_event(ggml_backend_t backend, void * event) {
+    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
+    CUDA_CHECK(cudaStreamWaitEvent(cuda_ctx->stream(), (cudaEvent_t) event, 0));
 }
 
 #ifdef USE_CUDA_GRAPH

@@ -2368,6 +2368,77 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_N_GPU_LAYERS"));
     add_opt(common_arg(
+        {"--swlp-window"}, "N",
+        "SWLP: GPU layer sliding window size (1-99, 0 = disabled, default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_window_size = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_WINDOW"));
+    add_opt(common_arg(
+        {"--swlp-prefetch"}, "N",
+        "SWLP: prefetch depth (layers ahead of current, default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_prefetch_depth = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_PREFETCH"));
+    add_opt(common_arg(
+        {"--swlp-expert-cache"}, "N",
+        "SWLP: per-layer expert cache size for MoE (0-9, 0 = disabled, default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_expert_cache_size = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_EXPERT_CACHE"));
+    add_opt(common_arg(
+        {"--swlp-expert-prefetch"}, "0|1",
+        "SWLP: enable expert prefetch via cross-layer gate prediction (default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_expert_prefetch = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_EXPERT_PREFETCH"));
+    add_opt(common_arg(
+        {"--swlp-pinned-copy"}, "0|1",
+        "SWLP: use pinned (page-locked) memory for faster CPU<->GPU DMA (default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_use_pinned_copy = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_PINNED_COPY"));
+    add_opt(common_arg(
+        {"--swlp-async-migration"}, "0|1",
+        "SWLP: async PCIe pipelining with double-buffered CUDA streams (default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_async_migration = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_ASYNC_MIGRATION"));
+    add_opt(common_arg(
+        {"--swlp-verbose"}, "0|1",
+        "SWLP: log layer migration activity (default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_verbose = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_VERBOSE"));
+    add_opt(common_arg(
+        {"--swlp-adaptive"}, "0|1",
+        "SWLP: enable adaptive window auto-tuning (default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_adaptive = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_ADAPTIVE"));
+    add_opt(common_arg(
+        {"--swlp-alpha"}, "F",
+        "SWLP: EWMA smoothing factor for adaptive tuning (0.1-1.0, default: 0.3)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_ewma_alpha = std::stof(value);
+            params.swlp_alpha_auto = false;  // explicit alpha disables auto
+        }
+    ).set_env("LLAMA_ARG_SWLP_ALPHA"));
+    add_opt(common_arg(
+        {"--swlp-adapt-interval"}, "N",
+        "SWLP: adaptive adjustment interval in decodes (0 = auto, default: 0)",
+        [](common_params & params, const std::string & value) {
+            params.swlp_adapt_interval = std::stoi(value);
+        }
+    ).set_env("LLAMA_ARG_SWLP_ADAPT_INTERVAL"));
+    add_opt(common_arg(
         {"-sm", "--split-mode"}, "{none,layer,row,tensor}",
         "how to split the model across multiple GPUs, one of:\n"
         "- none: use one GPU only\n"

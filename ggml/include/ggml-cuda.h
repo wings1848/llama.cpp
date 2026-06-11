@@ -45,6 +45,24 @@ GGML_BACKEND_API void ggml_backend_cuda_unregister_host_buffer(void * buffer);
 
 GGML_BACKEND_API ggml_backend_reg_t ggml_backend_cuda_reg(void);
 
+// Async migration API: PCIe transfer pipelining with double buffering.
+// These functions use a dedicated migration CUDA stream, separate from
+// the compute stream, allowing H2D/D2H copies to overlap with GPU kernels.
+//
+// Usage:
+//   void * ev = ggml_backend_cuda_migrate_event_create(backend);
+//   ggml_backend_cuda_set_tensor_migrate_async(backend, t, data, 0, n);
+//   ggml_backend_cuda_migrate_event_record(backend, ev);
+//   ggml_backend_cuda_wait_migration_event(backend, ev);  // on compute stream
+//   ggml_backend_cuda_migrate_event_destroy(ev);
+
+GGML_BACKEND_API void   ggml_backend_cuda_set_tensor_migrate_async(ggml_backend_t backend, struct ggml_tensor * tensor, const void * data, size_t offset, size_t size);
+GGML_BACKEND_API void   ggml_backend_cuda_get_tensor_migrate_async(ggml_backend_t backend, const struct ggml_tensor * tensor, void * data, size_t offset, size_t size);
+GGML_BACKEND_API void * ggml_backend_cuda_migrate_event_create(ggml_backend_t backend);
+GGML_BACKEND_API void   ggml_backend_cuda_migrate_event_destroy(void * event);
+GGML_BACKEND_API void   ggml_backend_cuda_migrate_event_record(ggml_backend_t backend, void * event);
+GGML_BACKEND_API void   ggml_backend_cuda_wait_migration_event(ggml_backend_t backend, void * event);
+
 #ifdef  __cplusplus
 }
 #endif
