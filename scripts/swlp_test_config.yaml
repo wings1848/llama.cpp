@@ -1,0 +1,331 @@
+# =============================================================
+# SWLP Test Framework - Configuration
+# =============================================================
+# Usage:
+#   python scripts/swlp_test.py --config scripts/swlp_test_config.yaml
+#   python scripts/swlp_test.py --config my_config.yaml --phase quick
+# =============================================================
+
+# ---- Benchmark executable ----
+bench:
+  # Path to llama-swlp-bench (relative to project root or absolute)
+  path: "./build_cuda_swlp/bin/llama-swlp-bench.exe"
+
+  # Default parameters passed to the bench binary
+  defaults:
+    ctx: 4096
+    threads: 4
+    batch: 2048
+    warmup: 1
+    iters: 5
+    prompt_tokens: 256
+    gen_tokens: 128
+    max_retries: 2
+
+  # Additional args appended to every bench invocation
+  extra_args: []
+
+# ---- Model search paths (checked in order) ----
+model_search_paths:
+  - "D:/Code_Project/swlp/models"
+  - "./models"
+  - "./models/modelscope_cache"
+
+# ---- Output directory (relative to cwd or absolute) ----
+output_dir: "./results"
+
+# ---- Monitoring (all optional) ----
+monitoring:
+  gpu: true   # nvidia-smi polling (VRAM, temp, util)
+  mem: false  # psutil memory tracking (system + process RSS)
+  cpu: false  # psutil CPU utilization polling
+
+# =============================================================
+# Models
+# =============================================================
+models:
+
+  # ---- Dense models ----
+  M1:
+    name: "Qwen2.5-0.5B"
+    file: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+    n_layers: 24
+    type: dense
+    quant: q4_k_m
+    size_gb: 0.4
+
+  M2:
+    name: "Qwen2.5-1.5B"
+    file: "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
+    n_layers: 28
+    type: dense
+    quant: q4_k_m
+    size_gb: 1.0
+
+  M3:
+    name: "Qwen2.5-3B"
+    file: "Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+    alt_file: "modelscope_cache/Qwen/Qwen2___5-3B-Instruct-GGUF/qwen2.5-3b-instruct-q4_k_m.gguf"
+    n_layers: 36
+    type: dense
+    quant: q4_k_m
+    size_gb: 2.0
+
+  M4:
+    name: "Qwen2.5-7B"
+    file: "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+    alt_file: "qwen25-7b-gguf/qwen2.5-7b-instruct-q4_k_m.gguf"
+    n_layers: 28
+    type: dense
+    quant: q4_k_m
+    size_gb: 4.7
+
+  M5:
+    name: "Gemma4-48L"
+    file: "gemma4-opus48-Q2_K.gguf"
+    n_layers: 48
+    type: dense
+    quant: q2_k
+    size_gb: 4.8
+
+  # ---- MoE models ----
+  E1:
+    name: "Tiny-Moe"
+    file: "Tiny-Moe-Q4_K_M.gguf"
+    n_layers: 12
+    type: moe
+    n_experts: 2
+    quant: q4_k_m
+    size_gb: 0.09
+
+  E2:
+    name: "Phi-mini-MoE"
+    file: "Phi-mini-MoE-instruct-Q4_K_M.gguf"
+    n_layers: 32
+    type: moe
+    n_experts: 16
+    quant: q4_k_m
+    size_gb: 4.8
+
+# =============================================================
+# Tests
+# =============================================================
+# Each test entry defines a benchmark configuration.
+#   id:           unique test id (optional for matrix entries, auto-assigned)
+#   desc:         human-readable description; supports {param} template syntax
+#   params:       parameters passed to the bench binary
+#   tags:         filterable tags (used with --phase)
+#   run_modes:    which modes to run (pp, gen, or both)
+#
+# Matrix expansion:
+#   When a param value is a list, the entry is expanded into multiple tests
+#   via Cartesian product (e.g., window: [1,2,4] × prefetch: [0,1]).
+#
+# Magic param values:
+#   "auto"  → -1 (let SWLP auto-detect window)
+#   "off"   → 0
+#   "all"   → model's n_layers (total layers)
+#   $key    → model config value (e.g., "$n_layers")
+# =============================================================
+tests:
+
+  # ---- Baselines ----
+  - id: 1
+    desc: "CPU baseline (no SWLP)"
+    params:
+      ngl: 0
+      window: 0
+      prefetch: 0
+    tags: [baseline, quick]
+
+  - id: 2
+    desc: "GPU baseline (no SWLP)"
+    params:
+      ngl: 99
+      window: 0
+      prefetch: 0
+    tags: [baseline, quick]
+
+  # ---- Window size sweep ----
+  - desc: "Window sweep W={window}"
+    params:
+      ngl: 0
+      window: [1, 2, 4, 8, 16, 24]
+      prefetch: 1
+      adaptive: false
+      pinned: false
+    tags: [window-sweep]
+
+  # ---- Prefetch depth sweep (W=4) ----
+  - desc: "Prefetch sweep W=4 PF={prefetch}"
+    params:
+      ngl: 0
+      window: 4
+      prefetch: [0, 1, 2, 4]
+      adaptive: false
+    tags: [prefetch-sweep]
+
+  # ---- Prefetch depth sweep (W=8) ----
+  - desc: "Prefetch sweep W=8 PF={prefetch}"
+    params:
+      ngl: 0
+      window: 8
+      prefetch: [0, 1, 2, 4]
+      adaptive: false
+    tags: [prefetch-sweep]
+
+  # ---- Adaptive mode ----
+  - desc: "Adaptive W={window}"
+    params:
+      ngl: 0
+      window: [4, 8]
+      prefetch: 1
+      adaptive: true
+    tags: [adaptive]
+
+  # ---- Pinned memory ----
+  - desc: "Pinned W=4"
+    params:
+      ngl: 0
+      window: 4
+      prefetch: 1
+      pinned: true
+    tags: [pinned]
+
+  - desc: "Pinned W=8"
+    params:
+      ngl: 0
+      window: 8
+      prefetch: 1
+      pinned: true
+    tags: [pinned]
+
+  # ---- SWLP auto mode ----
+  - desc: "SWLP auto (window=-1)"
+    params:
+      ngl: 0
+      window: "auto"
+      prefetch: 1
+    tags: [quick]
+
+  - desc: "SWLP auto + adaptive"
+    params:
+      ngl: 0
+      window: "auto"
+      prefetch: 1
+      adaptive: true
+    tags: [quick]
+
+  # ---- MoE: SWLP without expert cache ----
+  - desc: "MoE W={window} (no expert cache)"
+    model_types: [moe]
+    params:
+      ngl: 0
+      window: [2, 4]
+      prefetch: 1
+      expert_cache: 0
+    tags: [moe-sweep]
+
+  # ---- MoE: Expert cache size sweep ----
+  - desc: "ExpertCache={expert_cache} W=4"
+    model_types: [moe]
+    params:
+      ngl: 0
+      window: 4
+      prefetch: 1
+      expert_cache: [1, 2, 4, 8]
+      expert_prefetch: false
+    tags: [expert-cache]
+
+  # ---- MoE: Expert prefetch ----
+  - desc: "ExpertPrefetch EC=4 W=4"
+    model_types: [moe]
+    params:
+      ngl: 0
+      window: 4
+      prefetch: 1
+      expert_cache: 4
+      expert_prefetch: true
+    tags: [expert-cache]
+
+  - desc: "ExpertPrefetch EC=2 W=4"
+    model_types: [moe]
+    params:
+      ngl: 0
+      window: 4
+      prefetch: 1
+      expert_cache: 2
+      expert_prefetch: true
+    tags: [expert-cache]
+
+  # ---- MoE: Adaptive + expert cache ----
+  - desc: "Adaptive+EC=4 W=4"
+    model_types: [moe]
+    params:
+      ngl: 0
+      window: 4
+      prefetch: 1
+      adaptive: true
+      expert_cache: 4
+    tags: [adaptive, expert-cache]
+
+  # ---- MoE: Pinned + expert cache ----
+  - desc: "Pinned+EC=4 W=4"
+    model_types: [moe]
+    params:
+      ngl: 0
+      window: 4
+      prefetch: 1
+      pinned: true
+      expert_cache: 4
+    tags: [pinned, expert-cache]
+
+  # ---- Stress / edge cases ----
+  - desc: "Window = all layers"
+    params:
+      ngl: 0
+      window: "all"
+      prefetch: 1
+    tags: [stress]
+
+  - desc: "Partial GPU ngl=50 W=4"
+    params:
+      ngl: 50
+      window: 4
+      prefetch: 1
+    tags: [stress]
+
+  - desc: "Partial GPU ngl=10 W=4"
+    params:
+      ngl: 10
+      window: 4
+      prefetch: 1
+    tags: [stress]
+
+  - desc: "W=1 PF=0 (no prefetch)"
+    params:
+      ngl: 0
+      window: 1
+      prefetch: 0
+    tags: [stress]
+
+  - desc: "W=1 PF=4 (aggressive prefetch)"
+    params:
+      ngl: 0
+      window: 1
+      prefetch: 4
+    tags: [stress]
+
+  - desc: "Partial GPU ngl=5 W=4"
+    params:
+      ngl: 5
+      window: 4
+      prefetch: 1
+    tags: [stress]
+
+  - desc: "W=2 PF=0"
+    params:
+      ngl: 0
+      window: 2
+      prefetch: 0
+    tags: [stress]
